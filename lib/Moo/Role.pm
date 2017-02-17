@@ -64,7 +64,7 @@ sub _install_subs {
     my @name_proto = ref $name_proto eq 'ARRAY' ? @$name_proto : $name_proto;
     if (@_ % 2 != 0) {
       croak("Invalid options for " . join(', ', map "'$_'", @name_proto)
-        . " attribute(s): even number of arguments expected, got " . scalar @_)
+        . " attribute(s): even number of arguments expected, got " . scalar @_);
     }
     my %spec = @_;
     foreach my $name (@name_proto) {
@@ -72,8 +72,23 @@ sub _install_subs {
       ($INFO{$target}{accessor_maker} ||= do {
         require Method::Generate::Accessor;
         Method::Generate::Accessor->new
-      })->generate_method($target, $name, $spec_ref);
-      push @{$INFO{$target}{attributes}||=[]}, $name, $spec_ref;
+      };
+      my $attrs = $INFO{$target}{attributes}||=[];
+      if ($name =~ /^\+(.*)/) {
+        my $attr_name = $1;
+        my ($old_spec) =
+          map $attrs->[$_+1],
+          grep $attrs->[$_] eq $attr_name || $attrs->[$_] eq $name,
+          reverse 0 .. @$attrs/2 - 1;
+        if ($old_spec) {
+          $ag->merge_specs($spec_ref, $old_spec);
+          $ag->generate_method($target, $name, $spec_ref);
+        }
+      }
+      else {
+        $ag->generate_method($target, $name, $spec_ref);
+      }
+      push @$attrs, $name, $spec_ref;
       $me->_maybe_reset_handlemoose($target);
     }
   };
@@ -243,11 +258,8 @@ sub _make_accessors_if_moose {
 
 sub _make_accessors {
   my ($self, $target, $role) = @_;
-  my $acc_gen = ($Moo::MAKERS{$target}{accessor} ||= do {
-    require Method::Generate::Accessor;
-    Method::Generate::Accessor->new
-  });
-  my $con_gen = $Moo::MAKERS{$target}{constructor};
+  my $acc_gen = Moo->_accessor_maker_for($target);
+  my $con_gen = Moo->_constructor_maker_for($target);
   my @attrs = @{$INFO{$role}{attributes}||[]};
   while (my ($name, $spec) = splice @attrs, 0, 2) {
     # needed to ensure we got an index for an arrayref based generator

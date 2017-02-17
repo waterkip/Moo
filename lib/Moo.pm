@@ -144,24 +144,11 @@ sub _accessor_maker_for {
   my ($class, $target) = @_;
   return unless $MAKERS{$target};
   $MAKERS{$target}{accessor} ||= do {
-    my $maker_class = do {
-      if (my $m = do {
-            require Sub::Defer;
-            if (my $defer_target =
-                  (Sub::Defer::defer_info($target->can('new'))||[])->[0]
-              ) {
-              my ($pkg) = ($defer_target =~ /^(.*)::[^:]+$/);
-              $MAKERS{$pkg} && $MAKERS{$pkg}{accessor};
-            } else {
-              undef;
-            }
-          }) {
-        ref($m);
-      } else {
-        require Method::Generate::Accessor;
-        'Method::Generate::Accessor'
-      }
-    };
+    my (undef, @isa) = @{mro::get_linear_isa($target)};
+    my ($parent_new) = grep { *{_getglob($_.'::new')}{CODE} } @isa;
+    my $maker_class
+      = ref($parent_new && $MAKERS{$parent_new} && $MAKERS{$parent_new}{accessor})
+      || scalar(require Method::Generate::Accessor, 'Method::Generate::Accessor');
     $maker_class->new;
   }
 }
