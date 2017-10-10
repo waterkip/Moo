@@ -6,6 +6,11 @@ BEGIN { our @ISA = qw(Moo::Object) }
 use Sub::Quote qw(quote_sub quotify);
 use Moo::_Utils qw(_getglob);
 use Moo::_mro;
+BEGIN {
+  *_USE_DGD = "$]" < 5.014 ? sub(){1} : sub(){0};
+  require Devel::GlobalDestruction
+    if _USE_DGD();
+}
 
 sub generate_method {
   my ($self, $into) = @_;
@@ -21,7 +26,11 @@ sub generate_method {
       local $@;
       require Devel::GlobalDestruction;
       eval {
-        $self->DEMOLISHALL(Devel::GlobalDestruction::in_global_destruction);
+        $self->DEMOLISHALL(!.(
+          _USE_DGD
+            ? 'Devel::GlobalDestruction::in_global_destruction()'
+            : q[${^GLOBAL_PHASE} eq 'DESTRUCT']
+        ).q!);
       };
       $@;
     };
