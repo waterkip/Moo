@@ -13,7 +13,6 @@ BEGIN {
 }
 
 use ExtUtils::MakeMaker;
-use Module::Runtime qw(module_notional_filename);
 
 my $meta = CPAN::Meta->load_file($meta_file)->as_struct;
 my $req = CPAN::Meta::Requirements->from_string_hash( $meta->{x_breaks} );
@@ -22,7 +21,8 @@ pass 'checking breakages...';
 
 my @breaks;
 for my $module ($req->required_modules) {
-  my ($pm_file) = grep -e, map $_.'/'.module_notional_filename($module), @INC;
+  (my $file = "$module.pm") =~ s{::}{/}g;
+  my ($pm_file) = grep -e, map "$_/$file", @INC;
   next
     unless $pm_file;
   my $version = MM->parse_version($pm_file);

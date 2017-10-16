@@ -18,9 +18,15 @@ BEGIN {
             : $sn ? \&Sub::Name::subname
             : sub { $_[1] };
   *_CAN_SUBNAME = ($su || $sn) ? sub(){1} : sub(){0};
-}
 
-use Module::Runtime qw(use_package_optimistically module_notional_filename);
+  *_WORK_AROUND_BROKEN_MODULE_STATE = "$]" < 5.009 ? sub(){1} : sub(){0};
+  *_WORK_AROUND_HINT_LEAKAGE
+    = "$]" < 5.011 && !("$]" >= 5.009004 && "$]" < 5.010001)
+      ? sub(){1} : sub(){0};
+
+  my $module_name_rx = qr/\A(?!\d)\w+(?:::\w+)*\z/;
+  *_module_name_rx = sub(){$module_name_rx};
+}
 
 use Devel::GlobalDestruction ();
 use Exporter qw(import);
@@ -30,7 +36,7 @@ use Carp qw(croak);
 our @EXPORT = qw(
     _getglob _install_modifier _load_module _maybe_load_module
     _getstash _install_coderef _name_coderef
-    _unimport_coderefs _set_loaded
+    _unimport_coderefs _set_loaded _module_name_rx
 );
 
 sub _install_modifier {
@@ -44,13 +50,22 @@ sub _install_modifier {
   Class::Method::Modifiers::install_modifier(@_);
 }
 
+sub _require {
+  my ($file) = @_;
+  my $guard = _WORK_AROUND_BROKEN_MODULE_STATE
+    && bless([ $file ], 'Role::Tiny::__GUARD__');
+  local %^H if _WORK_AROUND_HINT_LEAKAGE;
+  eval { require $file; 1 } or croak $@;
+  pop @$guard if _WORK_AROUND_BROKEN_MODULE_STATE;
+}
+
 sub _load_module {
-  my $module = $_[0];
-  my $file = eval { module_notional_filename($module) } or croak $@;
-  use_package_optimistically($module);
+  my ($module) = @_;
+  croak qq{"$module" is not a module name!}
+    unless $module =~ _module_name_rx;
+  (my $file = "$module.pm") =~ s{::}{/}g;
   return 1
     if $INC{$file};
-  my $error = $@ || "Can't locate $file";
 
   # can't just ->can('can') because a sub-package Foo::Bar::Baz
   # creates a 'Baz::' key in Foo::Bar's symbol table
@@ -59,7 +74,9 @@ sub _load_module {
   return 1
     if $INC{"Moose.pm"} && Class::MOP::class_of($module)
     or Mouse::Util->can('find_meta') && Mouse::Util::find_meta($module);
-  croak $error;
+
+  _require $file;
+  return 1;
 }
 
 our %MAYBE_LOADED;
@@ -67,17 +84,20 @@ sub _maybe_load_module {
   my $module = $_[0];
   return $MAYBE_LOADED{$module}
     if exists $MAYBE_LOADED{$module};
-  if(! eval { use_package_optimistically($module) }) {
-    warn "$module exists but failed to load with error: $@";
-  }
-  elsif ( $INC{module_notional_filename($module)} ) {
+  (my $file = "$module.pm") =~ s{::}{/}g;
+
+  if (eval { _require $file; 1 }) {
     return $MAYBE_LOADED{$module} = 1;
+  }
+  elsif ($@ !~ /\ACan't locate \Q$file\E /) {
+    warn "$module exists but failed to load with error: $@";
   }
   return $MAYBE_LOADED{$module} = 0;
 }
 
 sub _set_loaded {
-  $INC{Module::Runtime::module_notional_filename($_[0])} ||= $_[1];
+  (my $file = "$_[0].pm") =~ s{::}{/}g;
+  $INC{$file} ||= $_[1];
 }
 
 sub _install_coderef {

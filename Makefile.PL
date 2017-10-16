@@ -24,7 +24,6 @@ my %META = (
     runtime => {
       requires => {
         'Class::Method::Modifiers'  => 1.10,  # for RT#80194
-        'Module::Runtime'           => 0.014, # for RT#86394
         'Role::Tiny'                => 2.000004,
         'Devel::GlobalDestruction'  => 0.11,  # for RT#78617
         'Scalar::Util'              => 0,
